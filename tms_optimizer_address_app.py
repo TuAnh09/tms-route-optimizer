@@ -13,6 +13,7 @@ import math
 import time
 from geopy.geocoders import Nominatim
 
+# ---------------- OR-TOOLS ----------------
 try:
     from ortools.constraint_solver import routing_enums_pb2
     from ortools.constraint_solver import pywrapcp
@@ -20,44 +21,41 @@ try:
 except Exception:
     ORTOOLS_AVAILABLE = False
 
-# ---------- CONFIG ----------
+# ---------------- APP CONFIG ----------------
 st.set_page_config(page_title="TMS Tối ưu tuyến đường (Address)", layout="wide")
 st.title("🚚 Ứng dụng TMS tối ưu hóa tuyến đường theo địa chỉ")
 
 geolocator = Nominatim(user_agent="tms_app")
 
-# ---------- HELPER ----------
+# ---------------- HELPER FUNCTIONS ----------------
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371
-    dlat = math.radians(lat2-lat1)
-    dlon = math.radians(lon2-lon1)
-    a = (math.sin(dlat/2)**2 +
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (math.sin(dlat / 2) ** 2 +
          math.cos(math.radians(lat1)) *
          math.cos(math.radians(lat2)) *
-         math.sin(dlon/2)**2)
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+         math.sin(dlon / 2) ** 2)
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
 
 def geocode_address(address):
     """
-    Geocode địa chỉ (ưu tiên địa chỉ Việt Nam)
-    - Thử tối đa 3 lần
-    - Tự động thêm ", Việt Nam" hoặc ", TP Hồ Chí Minh, Việt Nam" nếu cần
+    Geocode địa chỉ (ưu tiên Việt Nam, retry 3 lần nếu thất bại)
     """
     for attempt in range(3):
         try:
-            if attempt == 0:
-                query = address
-            elif attempt == 1:
-                query = address + ", Việt Nam"
-            else:
-                query = address + ", TP Hồ Chí Minh, Việt Nam"
+            query = f"{address}, Việt Nam"
+            location = geolocator.geocode(query, timeout=15)
 
-            location = geolocator.geocode(query, timeout=10)
             if location:
                 return location.latitude, location.longitude
+            else:
+                st.warning(f"⚠️ Lần thử {attempt + 1}: Không tìm thấy '{query}'")
+                time.sleep(1)
 
         except Exception as e:
-            # tạm nghỉ giữa các lần thử (để tránh bị giới hạn)
+            st.warning(f"⚠️ Lỗi lần {attempt + 1}: {e}")
             time.sleep(1)
 
     return None, None
@@ -65,13 +63,15 @@ def geocode_address(address):
 
 def compute_distance_matrix(coords):
     n = len(coords)
-    dist = [[0]*n for _ in range(n)]
+    dist = [[0] * n for _ in range(n)]
     for i in range(n):
         for j in range(n):
             if i != j:
-                dist[i][j] = int(haversine(coords[i][0], coords[i][1],
-                                           coords[j][0], coords[j][1]) * 1000)
+                dist[i][j] = int(
+                    haversine(coords[i][0], coords[i][1], coords[j][0], coords[j][1]) * 1000
+                )
     return dist
+
 
 def solve_with_ortools(distance_matrix):
     n = len(distance_matrix)
@@ -101,20 +101,23 @@ def solve_with_ortools(distance_matrix):
     route.append(manager.IndexToNode(index))
 
     total_distance = 0
-    for i in range(len(route)-1):
-        total_distance += distance_matrix[route[i]][route[i+1]]
+    for i in range(len(route) - 1):
+        total_distance += distance_matrix[route[i]][route[i + 1]]
+
     return route, total_distance
+
 
 def nearest_neighbor(distance_matrix):
     n = len(distance_matrix)
-    visited = [False]*n
+    visited = [False] * n
     route = [0]
     visited[0] = True
     total = 0
     current = 0
-    for _ in range(n-1):
+
+    for _ in range(n - 1):
         next_node = None
-        min_d = float('inf')
+        min_d = float("inf")
         for j in range(n):
             if not visited[j] and distance_matrix[current][j] < min_d:
                 min_d = distance_matrix[current][j]
@@ -125,11 +128,13 @@ def nearest_neighbor(distance_matrix):
         total += min_d
         visited[next_node] = True
         current = next_node
+
     route.append(0)
     total += distance_matrix[current][0]
     return route, total
 
-# ---------- INPUT ----------
+
+# ---------------- INPUT UI ----------------
 with st.sidebar:
     st.header("⚙️ Cấu hình")
     avg_speed = st.number_input("Tốc độ trung bình (km/h)", 5.0, 120.0, 30.0)
@@ -145,6 +150,7 @@ Khách C - 60 Lý Tự Trọng, Quận 1, TP.HCM
 Khách D - 500 Điện Biên Phủ, Quận 3, TP.HCM"""
 addresses_text = st.text_area("Nhập mỗi địa chỉ 1 dòng", sample, height=150)
 
+# ---------------- MAIN PROCESS ----------------
 if st.button("🧭 Geocode & Tối ưu hóa tuyến"):
     st.info("Đang xử lý geocoding... (sẽ mất vài giây)")
 
@@ -153,14 +159,23 @@ if st.button("🧭 Geocode & Tối ưu hóa tuyến"):
     names = ["Kho"] + [f"Điểm {i+1}" for i in range(len(addresses))]
 
     coords = []
+    valid_points = []
+    valid_names = []
+
     for i, addr in enumerate(all_points):
         lat, lon = geocode_address(addr)
         if lat is None:
-            st.error(f"❌ Không tìm thấy tọa độ cho: {addr}")
-            st.stop()
+            st.error(f"❌ Không tìm thấy tọa độ cho: {addr} — bỏ qua địa chỉ này.")
+            continue
         coords.append((lat, lon))
+        valid_points.append(addr)
+        valid_names.append(names[i])
         st.write(f"✅ {names[i]} → ({lat:.5f}, {lon:.5f})")
-        time.sleep(1)  # tránh giới hạn API
+        time.sleep(1)
+
+    if len(coords) < 2:
+        st.error("Không đủ địa chỉ hợp lệ để tối ưu hóa tuyến.")
+        st.stop()
 
     st.success("✅ Geocoding hoàn tất!")
 
@@ -186,14 +201,14 @@ if st.button("🧭 Geocode & Tối ưu hóa tuyến"):
     time_h = total_km / avg_speed
     st.success(f"Tổng quãng đường: **{total_km:.2f} km**, Thời gian ước tính: **{time_h:.2f} giờ**")
 
-    route_names = [names[i] for i in route]
+    route_names = [valid_names[i] for i in route]
     st.write("**Thứ tự tuyến:**")
     st.write(" → ".join(route_names))
 
     df_result = pd.DataFrame({
-        "Thứ tự": list(range(1, len(route)+1)),
-        "Tên": [names[i] for i in route],
-        "Địa chỉ": [all_points[i] for i in route],
+        "Thứ tự": list(range(1, len(route) + 1)),
+        "Tên": [valid_names[i] for i in route],
+        "Địa chỉ": [valid_points[i] for i in route],
         "Lat": [coords[i][0] for i in route],
         "Lon": [coords[i][1] for i in route],
     })
@@ -201,19 +216,21 @@ if st.button("🧭 Geocode & Tối ưu hóa tuyến"):
 
     # Map visualization
     import pydeck as pdk
-    points = [{"lat": c[0], "lon": c[1], "name": names[i]} for i, c in enumerate(coords)]
+    points = [{"lat": c[0], "lon": c[1], "name": valid_names[i]} for i, c in enumerate(coords)]
     path = [{"path": [(coords[i][1], coords[i][0]) for i in route]}]
     view = pdk.ViewState(latitude=np.mean([c[0] for c in coords]),
                          longitude=np.mean([c[1] for c in coords]),
                          zoom=12)
-    layer_route = pdk.Layer("PathLayer", path, get_path="path", get_width=4, width_scale=20, get_color=[0, 128, 255])
-    layer_points = pdk.Layer("ScatterplotLayer", points, get_position=["lon","lat"], get_radius=80,
-                             get_fill_color=[255, 128, 0], pickable=True)
-    r = pdk.Deck(layers=[layer_route, layer_points], initial_view_state=view, tooltip={"text": "{name}"})
+    layer_route = pdk.Layer("PathLayer", path, get_path="path", get_width=4,
+                            width_scale=20, get_color=[0, 128, 255])
+    layer_points = pdk.Layer("ScatterplotLayer", points, get_position=["lon", "lat"],
+                             get_radius=80, get_fill_color=[255, 128, 0], pickable=True)
+    r = pdk.Deck(layers=[layer_route, layer_points], initial_view_state=view,
+                 tooltip={"text": "{name}"})
     st.pydeck_chart(r)
 
-    st.download_button("⬇️ Tải kết quả CSV", df_result.to_csv(index=False).encode("utf-8"),
+    st.download_button("⬇️ Tải kết quả CSV",
+                       df_result.to_csv(index=False).encode("utf-8"),
                        "route_result.csv", "text/csv")
 
-st.caption("💡 Lưu ý: geocoding dùng dữ liệu OpenStreetMap (Nominatim) miễn phí, có thể chậm hoặc giới hạn ~1 truy vấn/giây.")
-
+st.caption("💡 Lưu ý: geocoding dùng OpenStreetMap (Nominatim), miễn phí nhưng có giới hạn ~1 truy vấn/giây.")
