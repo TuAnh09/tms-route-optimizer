@@ -38,14 +38,30 @@ def haversine(lat1, lon1, lat2, lon2):
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
 
 def geocode_address(address):
-    try:
-        location = geolocator.geocode(address)
-        if location:
-            return location.latitude, location.longitude
-        else:
-            return None, None
-    except:
-        return None, None
+    """
+    Geocode địa chỉ (ưu tiên địa chỉ Việt Nam)
+    - Thử tối đa 3 lần
+    - Tự động thêm ", Việt Nam" hoặc ", TP Hồ Chí Minh, Việt Nam" nếu cần
+    """
+    for attempt in range(3):
+        try:
+            if attempt == 0:
+                query = address
+            elif attempt == 1:
+                query = address + ", Việt Nam"
+            else:
+                query = address + ", TP Hồ Chí Minh, Việt Nam"
+
+            location = geolocator.geocode(query, timeout=10)
+            if location:
+                return location.latitude, location.longitude
+
+        except Exception as e:
+            # tạm nghỉ giữa các lần thử (để tránh bị giới hạn)
+            time.sleep(1)
+
+    return None, None
+
 
 def compute_distance_matrix(coords):
     n = len(coords)
@@ -200,3 +216,4 @@ if st.button("🧭 Geocode & Tối ưu hóa tuyến"):
                        "route_result.csv", "text/csv")
 
 st.caption("💡 Lưu ý: geocoding dùng dữ liệu OpenStreetMap (Nominatim) miễn phí, có thể chậm hoặc giới hạn ~1 truy vấn/giây.")
+
