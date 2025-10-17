@@ -1,7 +1,7 @@
-# tms_optimizer_coords_app.py
+# tms_optimizer_full_app.py
 """
-TMS Route Optimizer (Latitude / Longitude)
-- Input: warehouse + delivery points (lat, lon)
+TMS Route Optimizer (Name + Address + Latitude + Longitude)
+- Input: warehouse + delivery list (name, address, lat, lon)
 - Optimize route using OR-Tools (if available) or Nearest Neighbor
 """
 
@@ -18,8 +18,8 @@ except Exception:
     ORTOOLS_AVAILABLE = False
 
 # ---------- CONFIG ----------
-st.set_page_config(page_title="TMS Tối ưu tuyến đường (Tọa độ)", layout="wide")
-st.title("🚚 Ứng dụng TMS tối ưu hóa tuyến đường theo tọa độ")
+st.set_page_config(page_title="TMS Tối ưu tuyến đường (Full Info)", layout="wide")
+st.title("🚚 Ứng dụng TMS tối ưu hóa tuyến đường (Tên + Địa chỉ + Tọa độ)")
 
 # ---------- HÀM HỖ TRỢ ----------
 def haversine(lat1, lon1, lat2, lon2):
@@ -105,18 +105,20 @@ with st.sidebar:
     avg_speed = st.number_input("Tốc độ trung bình (km/h)", 5.0, 120.0, 30.0)
     allow_return = st.checkbox("Trở lại kho cuối chuyến", value=True)
 
-st.subheader("1️⃣ Nhập tọa độ kho")
+st.subheader("1️⃣ Nhập thông tin kho hàng")
+warehouse_name = st.text_input("Tên kho", "Kho Trung tâm")
+warehouse_address = st.text_input("Địa chỉ kho", "285 Cách Mạng Tháng 8, Quận 10, TP.HCM")
 warehouse_lat = st.number_input("Vĩ độ (lat) kho", value=10.7765)
 warehouse_lon = st.number_input("Kinh độ (lon) kho", value=106.7009)
 
 st.subheader("2️⃣ Danh sách điểm giao hàng")
-st.markdown("Bạn có thể **nhập thủ công** hoặc **tải file CSV** gồm cột: `Tên,Lat,Lon`.")
+st.markdown("Nhập thủ công hoặc tải file CSV có cột: `Tên,Địa chỉ,Lat,Lon`")
 
-sample = """Khách A,10.7771,106.6958
-Khách B,10.7805,106.6992
-Khách C,10.7735,106.7073
-Khách D,10.7699,106.6822"""
-addresses_text = st.text_area("Nhập dữ liệu CSV", sample, height=150)
+sample = """Khách A,43 Nguyễn Huệ,Quận 1,10.7769,106.7009
+Khách B,1 Lê Duẩn,Quận 1,10.7792,106.6998
+Khách C,60 Lý Tự Trọng,Quận 1,10.7754,106.7032
+Khách D,500 Điện Biên Phủ,Quận 3,10.7797,106.6896"""
+addresses_text = st.text_area("Nhập danh sách (CSV)", sample, height=180)
 
 uploaded = st.file_uploader("Hoặc tải file CSV", type=["csv"])
 
@@ -124,10 +126,12 @@ if uploaded:
     df = pd.read_csv(uploaded)
 else:
     from io import StringIO
-    df = pd.read_csv(StringIO(addresses_text), names=["Tên", "Lat", "Lon"])
+    df = pd.read_csv(StringIO(addresses_text), names=["Tên", "Địa chỉ", "Khu vực", "Lat", "Lon"])
 
 if st.button("🚀 Tối ưu hóa tuyến"):
-    all_names = ["Kho"] + df["Tên"].tolist()
+    # Tổng hợp dữ liệu
+    all_names = [warehouse_name] + df["Tên"].tolist()
+    all_addresses = [warehouse_address] + df["Địa chỉ"].fillna("").tolist()
     all_coords = [(warehouse_lat, warehouse_lon)] + list(zip(df["Lat"], df["Lon"]))
 
     dist_matrix = compute_distance_matrix(all_coords)
@@ -156,6 +160,7 @@ if st.button("🚀 Tối ưu hóa tuyến"):
     df_result = pd.DataFrame({
         "Thứ tự": list(range(1, len(route) + 1)),
         "Tên": [all_names[i] for i in route],
+        "Địa chỉ": [all_addresses[i] for i in route],
         "Lat": [all_coords[i][0] for i in route],
         "Lon": [all_coords[i][1] for i in route],
     })
@@ -177,4 +182,4 @@ if st.button("🚀 Tối ưu hóa tuyến"):
     st.download_button("⬇️ Tải kết quả CSV", df_result.to_csv(index=False).encode("utf-8"),
                        "route_result.csv", "text/csv")
 
-st.caption("💡 Lưu ý: Nhập đúng định dạng tọa độ (Lat, Lon) — đơn vị độ thập phân (VD: 10.7765, 106.7009).")
+st.caption("💡 Lưu ý: Dữ liệu cần có các cột: Tên, Địa chỉ, Lat, Lon. Có thể nhập trực tiếp hoặc tải file CSV.")
